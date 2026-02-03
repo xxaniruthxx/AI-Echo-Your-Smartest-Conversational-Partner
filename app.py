@@ -1,63 +1,83 @@
 import streamlit as st
 import pandas as pd
 import re
-import nltk
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.svm import LinearSVC
-from sklearn.utils import resample
+from sklearn.linear_model import LogisticRegression
 
-nltk.download("stopwords")
-nltk.download("wordnet")
 
-df = pd.read_excel("chatgpt_style_reviews_dataset.xlsx")
+data = pd.read_excel("clean_reviews_dataset.xlsx")
 
-df['sentiment'] = df['rating'].apply(
+
+data["sentiment"] = data["rating"].apply(
     lambda x: "Positive" if x >= 4 else "Neutral" if x == 3 else "Negative"
 )
 
-stop = set(stopwords.words("english"))
-for w in ["not", "no", "never"]:
-    if w in stop:
-        stop.remove(w)
 
-lemm = WordNetLemmatizer()
+def clean_text(text):
+    text = str(text).lower()
+    text = re.sub(r"[^a-zA-Z\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
-def clean(t):
-    t = str(t).lower()
-    t = re.sub(r"[^a-zA-Z\s]", "", t)
-    words = t.split()
-    words = [lemm.lemmatize(i) for i in words if i not in stop]
-    return " ".join(words)
+data["clean_review"] = data["review"].apply(clean_text)
 
-df["clean_review"] = df["review"].apply(clean)
 
-pos = df[df.sentiment == "Positive"]
-neu = df[df.sentiment == "Neutral"]
-neg = df[df.sentiment == "Negative"]
+vectorizer = TfidfVectorizer(max_features=2000)
+X = vectorizer.fit_transform(data["clean_review"])
+y = data["sentiment"]
 
-min_len = min(len(pos), len(neu), len(neg))
 
-df_bal = pd.concat([
-    resample(pos, n_samples=min_len, random_state=42),
-    resample(neu, n_samples=min_len, random_state=42),
-    resample(neg, n_samples=min_len, random_state=42)
-]).sample(frac=1)
-
-tfidf = TfidfVectorizer(max_features=5000)
-X = tfidf.fit_transform(df_bal["clean_review"])
-y = df_bal["sentiment"]
-
-model = LinearSVC()
+model = LogisticRegression()
 model.fit(X, y)
+
+
+positive_words = ["good", "very good", "nice", "excellent", "amazing", "great", "love", "awesome"]
+negative_words = ["bad", "worst", "terrible", "awful", "hate", "poor", "useless"]
+neutral_words  = ["okay", "average", "fine", "normal", "not bad", "not good"]
+
 
 st.title("AI Echo - Sentiment Analysis App")
 
-review = st.text_area("Enter a review:")
 
-if st.button("Predict"):
-    cleaned = clean(review)
-    vector = tfidf.transform([cleaned])
-    prediction = model.predict(vector)[0]
-    st.success(f"Sentiment: {prediction}")
+user_text = st.text_area("Enter your review:")
+
+if st.button("Predict Sentiment"):
+    if user_text.strip() == "":
+        st.warning("Please type something")
+    else:
+        text = user_text.lower()
+        predicted = None
+
+        
+        for w in neutral_words:
+            if w in text:
+                predicted = "Neutral"
+                break
+
+        
+        if predicted is None:
+            for w in positive_words:
+                if w in text:
+                    predicted = "Positive"
+                    break
+
+        # Negative
+        if predicted is None:
+            for w in negative_words:
+                if w in text:
+                    predicted = "Negative"
+                    break
+
+        # ML fallback
+        if predicted is None:
+            clean = clean_text(user_text)
+            text_num = vectorizer.transform([clean])
+            predicted = model.predict(text_num)[0]
+
+        # Show result
+        if predicted == "Positive":
+            st.success("Sentiment: Positive ")
+        elif predicted == "Neutral":
+            st.info("Sentiment: Neutral ")
+        else:
+            st.error("Sentiment: Negative ")
